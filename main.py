@@ -2,6 +2,8 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware  # <-- NUEVA LIBRERÍA
 import fitz  # PyMuPDF
 import re
+import os 
+import uvicorn
 
 # Inicializamos nuestra API (como const app = express())
 app = FastAPI()
@@ -48,3 +50,8 @@ async def limpiar_pdf(file: UploadFile = File(...)):
 
     # 3. Respondemos con un JSON listo para ser leído en voz alta
     return {"texto_limpio": "\n\n".join(texto_final)}
+
+if __name__ == "__main__":
+    # Esto lee el puerto que le asigne el servidor, o usa el 8000 si estás en local
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
