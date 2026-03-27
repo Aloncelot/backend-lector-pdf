@@ -1,29 +1,28 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware  # <-- NUEVA LIBRERÍA
+from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import re
 import os 
 import uvicorn
 
-# Inicializamos nuestra API (como const app = express())
+# Inicializamos nuestra API
 app = FastAPI()
 
-# Agregamos esta línea para permitir que la app móvil se conecte
+# Permisos para que la app móvil se conecte
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite que cualquier origen se conecte (puedes restringirlo después)
+    allow_origins=["*"], 
     allow_credentials=True,
-    allow_methods=["*"],  # Permite métodos GET, POST, etc.
+    allow_methods=["*"], 
     allow_headers=["*"],
 )
 
-# Creamos una ruta POST para recibir el archivo
 @app.post("/limpiar-pdf")
 async def limpiar_pdf(file: UploadFile = File(...)):
-    # 1. Leemos los "bytes" del archivo que enviará la app móvil
+    # 1. Leemos los bytes del archivo
     contenido_pdf = await file.read()
     
-    # 2. PyMuPDF abre el archivo directamente desde la memoria
+    # 2. PyMuPDF abre el archivo
     doc = fitz.open(stream=contenido_pdf, filetype="pdf")
     texto_final = []
 
@@ -35,23 +34,42 @@ async def limpiar_pdf(file: UploadFile = File(...)):
             texto_bloque = b[4]
             y_pos = b[1]
             
-            # FILTRO DE MÁRGENES: Ignoramos "Universidad ARCIS"
-            if y_pos < 60 or y_pos > (alto_pagina - 50):
+            # --- FILTRO 1: MÁRGENES (Restaurado) ---
+            # Ignoramos encabezados y pies de página fijos
+            if y_pos < 20 or y_pos > (alto_pagina - 50):
                 continue
             
-            # FILTRO REGEX: Ignoramos los números "- 1 -"
-            if re.match(r"^\s*-\d+-\s*$", texto_bloque.strip()):
+            # --- FILTRO 2: REGEX PARA BASURA VISUAL ---
+            texto_limpio = texto_bloque.strip()
+            
+            # Ignoramos los números de página con guiones viejos: "- 1 -"
+            if re.match(r"^\s*-\d+-\s*$", texto_limpio):
+                continue
+                
+            # NUEVO: Ignoramos paginación de libros: "Página 4", "PÁGINA 170"
+            if re.match(r"(?i)^Página\s*\d+$", texto_limpio):
                 continue
 
-            # Limpiamos saltos de línea y guardamos
+            # --- FILTRO 3: UNIÓN DE PALABRAS CORTADAS ---
+            # Si una palabra se cortó con guion al final del renglón (ej: cons-\ntrucción), la unimos.
+            texto_bloque = texto_bloque.replace("-\n", "")
+
+            # --- FILTRO 4: LIMPIEZA DE SALTOS Y ESPACIOS ---
             limpio = texto_bloque.replace("\n", " ").strip()
+            limpio = re.sub(r'\[\d+\]', '', limpio)  
+            
+            # Si quedaron dobles espacios por la fusión, los reducimos a uno
+            limpio = re.sub(r'\s+', ' ', limpio)
+
             if limpio:
                 texto_final.append(limpio)
 
-    # 3. Respondemos con un JSON listo para ser leído en voz alta
-    return {"texto_limpio": "\n\n".join(texto_final)}
+    # 3. Unimos todos los bloques limpios con un solo espacio para que Flutter lo corte bien por puntos
+    texto_completo = " ".join(texto_final)
+    
+    return {"texto_limpio": texto_completo}
 
 if __name__ == "__main__":
-    # Esto lee el puerto que le asigne el servidor, o usa el 8000 si estás en local
+    # Lee el puerto que asigne el servidor, o usa 8000 en local
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
